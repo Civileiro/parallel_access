@@ -1,74 +1,40 @@
-import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.Queue;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.Semaphore;
+
 
 public class CSC {
-    private final Lock lockAcesso = new ReentrantLock(true);
-    private final HashMap<Empresa, Condition> empresasCadastradas = new HashMap<>();
-    private final Condition esperandoUsar = lockAcesso.newCondition();
+    private final Semaphore semaforoUso = new Semaphore(3, true);
     private Empresa empresaUsando = null;
-    private final int maxAcessosSimultaneos = 3;
     private int pessoasUsando = 0;
     private final Queue<Empresa> empresasEsperando = new LinkedList<>();
 
-    private Lock getLockAcesso() {
-        return lockAcesso;
-    }
-    public void cadastrarEmpresa(Empresa e) {
-        synchronized (empresasCadastradas) {
-            var aviso = this.lockAcesso.newCondition();
-            empresasCadastradas.put(e, aviso);
-        }
-
-    }
-
-    private void esperarVaga() throws InterruptedException {
-        while(pessoasUsando == maxAcessosSimultaneos) {
-            esperandoUsar.await();
-        }
-        pessoasUsando++;
-    }
     public void requisitarAcesso(Empresa p) throws InterruptedException {
-        this.getLockAcesso().lock();
-        try {
+        synchronized (this) {
             while(true) {
-                if (pessoasUsando == 0) {
-                    empresaUsando = null;
-                }
                 if (empresaUsando == null || empresaUsando == p) {
                     empresaUsando = p;
-                    esperarVaga();
-                    return;
+                    pessoasUsando++;
+                    break;
                 }
 
                 if(!empresasEsperando.contains(p)) {
                     empresasEsperando.add(p);
                 }
+                wait();
+            }
 
-                empresasCadastradas.get(p).await();
-            }
-        } finally {
-            this.getLockAcesso().unlock();
         }
+        semaforoUso.acquire();
     }
-    public void concluirAcesso(Empresa p) throws InterruptedException {
-        this.getLockAcesso().lock();
-        try {
-            if(pessoasUsando == maxAcessosSimultaneos) {
-                esperandoUsar.signal();
-            }
+    public void concluirAcesso() {
+        semaforoUso.release();
+        synchronized (this) {
             pessoasUsando--;
             if(pessoasUsando == 0) {
-                var proximaEmpresa = empresasEsperando.poll();
-                if(proximaEmpresa != null) {
-                    empresasCadastradas.get(proximaEmpresa).signalAll();
-                }
+                empresaUsando = empresasEsperando.poll();
+                notifyAll();
             }
-        } finally {
-            this.getLockAcesso().unlock();
         }
     }
 
